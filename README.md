@@ -10,18 +10,19 @@ loops for editing.
 Far from perfect, but usually saves time on squinting at waveforms trying
 to find the exact spot where they line up.
 
+
 ## Installing
 
 The loopfinder is a python script, so requires python (probably anything 3.7 or
-newer will work). You'll also need the librosa, scipy, and matplotlib libraries
-installed (cheatsheet: `pip3 install librosa scipy matplotlib`). You may also
-need `ffmpeg` installed somewhere in your path, for reading certain file types.
+newer will work). You'll also need the librosa, numpy, scipy, and matplotlib
+libraries installed (cheatsheet: `pip3 install librosa numpy scipy matplotlib`
+or `pip3 install -r requirements.txt`). You may also need `ffmpeg` installed
+somewhere in your path, for reading certain file types.
 
 On linux & mac, you should just be able to drop the script into `/usr/local/bin`
 or `~/bin` or wherever and call it by name; on windows you'll probably need to
 do something like `py -3 c:\some\path\loopfinder.py`, or make yourself a 2-line
 bat script to do the same.
-
 
 
 ## Usage
@@ -71,12 +72,11 @@ with no real obvious spikes, or sometimes a ton of obvious spikes.
 
 ### example 1: good correlation
 
-![](./cross-yes-correlation.png)
+![positively correlated graph](./cross-yes-correlation.png)
 
 ### example: bad correlation
 
-![](./cross-no-correlation.png)
-
+![negatively correlated graph](./cross-no-correlation.png)
 
 
 ## A full example
@@ -143,10 +143,11 @@ marker info), you can request that a set of markers be generated for you,
 using the `--markers` command-line option. When specified, you get a chunk of
 data:
 
-```
+```csv
 29.900000,29.900000,1,segmentation,Loop_1
 129.077000,129.077000,1,segmentation,Loop_2
 228.254000,228.254000,1,segmentation,Loop_3
+[etc]
 ```
 
 This can be cut & pasted into a modified version of the free "Markerbox"
@@ -154,7 +155,7 @@ extension for Premiere (ask Alinsa for it), which will turn that chunk of
 data into markers for both the video clip itself, and for the sequence as
 a whole, shown here in use partially through an edit:
 
-![](./premiere-markers.png)
+![premiere marker example](./premiere-markers.png)
 
 Once mark(er)ed this way (before you begin editing), as long as the markers
 on the clips are kept aligned with one of the markers on the sequence (and
