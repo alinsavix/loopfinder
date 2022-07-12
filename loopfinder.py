@@ -76,7 +76,7 @@ def find_offset(file: Path, start_offset: float, search_offset: float, window: i
     right, samplerate = librosa.load(
         str(file), sr=None, offset=start_offset, duration=window, mono=True)
     left, _ = librosa.load(str(file), sr=samplerate, offset=search_offset,
-                           duration=2 * window, mono=True)
+                           duration=3 * window, mono=True)
 
     # I won't lie, I don't entirely understand the specifics of why this
     # particular set of options works. From what I can tell, doing the
@@ -123,7 +123,11 @@ def find_offset(file: Path, start_offset: float, search_offset: float, window: i
     plt.savefig("cross-correlation.png")
 
     if not skip_graph:
-        plt.show()
+        try:
+            plt.show()
+        except Exception:  # FIXME: figure out what this actually throws, and catch that
+            print("ERROR: can't show graph. Make sure you have a matplotlib backend installed.")
+
 
 
     # So at this point we have...
@@ -233,8 +237,8 @@ def main():
         f"Loop start:  {info.start:0.3f}s\n"
         f"Loop end:    {info.end:0.3f}s\n"
         f"Loop length: {info.length:0.3f}s\n"
-        "\n"
-        f"Clip length: {duration:0.3f}s\n"
+        # "\n"
+        # f"Clip length: {duration:0.3f}s\n"
     )
 
     #     print(
@@ -245,16 +249,15 @@ def main():
     #         f"Loop start: {info['start']:0.3f}s\nEnds at: {info['end']:0.3f}\nLoop length: {info['length']:0.3f}s\nTrack duration: {duration:0.3f}s")
 
     if args.markers > 0:
-
-        t = args.start
+        t = info.start
         i = 1
 
         print()
         while True:
             print(f"{t:0.6f},{t:0.6f},1,segmentation,Loop_{i}")
             i += 1
-            t += info['length']
-            if t > (duration + info['length']):
+            t += info.length
+            if t > (duration + info.length):
                 break
 
 
