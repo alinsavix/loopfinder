@@ -3,9 +3,9 @@
 A little command-line tool that uses mathematical correlation on audio files
 for helping to figure out exactly where a looped piece of music starts to
 repeat itself, so that you can know the exact length of the loop, which is
-almost a requirement for editing Dr. Ong highlights. Can optionally provide
-a marker file for import into editing software to automatically mark the
-loops for editing.
+almost a requirement for editing Dr. Ong highlights. The loopfinder can
+optionally provide a marker file for import into editing software to
+automatically mark the loops for editing.
 
 Far from perfect, but usually saves time on squinting at waveforms trying
 to find the exact spot where they line up.
@@ -24,6 +24,32 @@ or `~/bin` or wherever and call it by name; on windows you'll probably need to
 do something like `py -3 c:\some\path\loopfinder.py`, or make yourself a 2-line
 bat script to do the same.
 
+If someone were to request a `pip install`-able version of this tool, that
+could probably be made to happen.
+
+
+## Definitions
+
+A couple of definitions for terms we'll (try to) use consistently here:
+
+<!-- be sure to keep the spaces at the end of the lines here, to get formatting -->
+**source audio**  
+The raw audio file, as read from the audio or video file
+provided on the command line.
+
+**correlation source** or **source segment**  
+The segment of audio, usually from
+the beginning of the first layer of a loop, that will be used as the 'template'
+to find where the loop starts to repeat. The source segment is determined by
+a combination of the `--start` and `--window` options (see below)
+
+**correlation target** or **target segment**  
+  The segment of audio that the
+correlator will search in an attempt to find where a loop repeats. The target
+segment is determined by a combination of the `--search-at` and `--window`
+options, where the target segment will start at the timestamp provided by
+the `--search-at` option, and will be as long as 4 times the `--window` option.
+
 
 ## Usage
 
@@ -33,20 +59,30 @@ is needed, you can use either `HH:MM:SS.sss` format, or just decimal seconds
 (`SS.sss`). The only exception to this is the window size, which must be an
 integer number of seconds (for now)
 
-1. `--start OFFSET` -- the time offset for the start of the audio that will be
-   used to perform the correlation. This is generally audio near the beginning
-   of the first pass through the loop.
-2. `--window SECONDS` -- the length of audio to use (starting at the offset
-   from the `--start` option) to use for the correlation. Usually 2 or 3 seconds
-   will suffice.
-3. `--search_at OFFSET` the time offset at which to start searching for the
-   correlation. At the moment this offset needs to be *before* the repeated
-   audio that you are trying to match against, but fairly close (within 2 times
-   the window size). You should be able to identify the right spot by ear with
-   no real effort.
+<!-- be sure to keep the spaces at the end of the lines here, to get formatting -->
+`--start OFFSET`  
+The time offset, into the source audio, for the audio that will be used as the
+correlation *source*. This is generally audio near the beginning of the first
+pass through the loop.
 
-When you run the loopfinder command, it will do its magic, find the best
-correlation, print out some technical info, show you a pretty graph (more on
+`--window SECONDS`  
+The length of audio to use (starting at the offset from the `--start` option)
+to use for the correlation source. Usually 2 or 3 seconds will suffice.
+
+`--search-at OFFSET`  
+The time offset, into the source audio, of the correlation *target*, where
+the search will begin. The audio used as the correlation target will start
+at the specified timestamp, and continue for a length of 4 times the window
+size. e.g. with a window size of `2` and a search offset of `00:49.0`, the
+audio range to be searched will start at `00:49.0` and end at `00:57.0`. At
+the moment this offset needs to be *before* the repeated audio that you are
+trying to match against, but fairly close. You should be able to identify an
+appropriate offset by ear with no real effort.
+
+When you run the loopfinder command, it will do its magic, reading in the
+correlation source audio, comparing it to the correlation target audio, and
+finding the location that has the best correlation. Once this has been done,
+it will print out some technical info, show you a pretty graph (more on
 that in a moment), and finally print the vital information about the length
 of the loop.
 
@@ -60,7 +96,8 @@ somewhat left as an exercise for the reader.
 *In general*, a good correlation will have a peak over 3.0, an average
 difference of less than 100, and a prominence over 5. Some of these
 can still be in this range even for a bad correlation, though, so takes
-some judgement. The graphs end up really helping.
+some judgement. Good correlations always seem to be obvious on the graphs,
+though.
 
 Speaking of graphs! Assuming you have a matplotlib backend installed (which
 is (probably) the default on most matplotlib installs), loopfinder will pop
@@ -88,8 +125,8 @@ your favorite editor, you should be able to play it back and find the start of
 the loop, and the point at which the loop starts to repeat.
 
 On the example file, by my ear, the start of the loop is 29.9 seconds in,
-and starts to repeat right after the 2 minutes 7 seconds point. Using that
-information, you can run the loopfinder:
+and starts to repeat right after the 2 minutes 7 seconds point (which makes
+it a pretty long loop!). Using that information, you can run the loopfinder:
 
 ```bash
 $ loopfinder.py --start 29.9 --search_at 2:07 --window 3 loopfinder-example-babylon-5.mp4
