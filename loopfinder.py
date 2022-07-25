@@ -31,8 +31,11 @@ from scipy import signal
 @dataclass
 class OffsetInfo(object):
     start: float
+    start_samples: int
     end: float
     length: float
+    length_samples: int
+    samplerate: int
 
 
 # A very basic HH:MM:SS.SSS format to seconds conversion. We could
@@ -76,7 +79,7 @@ def find_offset(file: Path, start_offset: float, search_offset: float, window: i
     right, samplerate = librosa.load(
         str(file), sr=None, offset=start_offset, duration=window, mono=True)
     left, _ = librosa.load(str(file), sr=samplerate, offset=search_offset,
-                           duration=3 * window, mono=True)
+                           duration=4 * window, mono=True)
 
     # I won't lie, I don't entirely understand the specifics of why this
     # particular set of options works. From what I can tell, doing the
@@ -114,7 +117,7 @@ def find_offset(file: Path, start_offset: float, search_offset: float, window: i
     # of this, but time will (or may, at least) tell.
     # See: https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.peak_prominences.html
     prom = float(signal.peak_prominences(c, [peak], wlen=samplerate)[0])
-    print(f"Found! {peak} samples ({match_offset}s) from search offset {search_offset}s")
+    print(f"Found! {peak} samples ({match_offset:0.3f}s) from search offset {search_offset:0.3f}s")
     print(f"       peak corr. {c[peak]:0.3f}, avg diff. {avg:0.3f}, prominence {prom:0.3f}")
 
     plt.figure(figsize=(14, 5))
@@ -139,8 +142,12 @@ def find_offset(file: Path, start_offset: float, search_offset: float, window: i
     #   - start: the start time of the loop within the provided file
     #   - end: the end time of the loop within the file
     #   - length: the length of the loop
+    start_samples = int(start_offset * samplerate)
     endtime = search_offset + match_offset
-    return OffsetInfo(start=start_offset, end=endtime, length=endtime - start_offset)
+    endtime_samples = int(search_offset * samplerate) + peak
+    length = endtime - start_offset
+    length_samples = endtime_samples - start_samples
+    return OffsetInfo(start=start_offset, start_samples=start_samples, end=endtime, length=length, length_samples=length_samples, samplerate=samplerate)
 
 
 # helper function to validate and parse a provided time string
@@ -234,9 +241,10 @@ def main():
 
     print(
         "\n"
-        f"Loop start:  {info.start:0.3f}s\n"
-        f"Loop end:    {info.end:0.3f}s\n"
-        f"Loop length: {info.length:0.3f}s\n"
+        f"Loop start:  {info.start:0.3f}s ({sec_to_hms(info.start)}; {info.start_samples} samples)\n"
+        f"Loop end:    {info.end:0.3f}s ({sec_to_hms(info.end)})\n"
+        f"Loop length: {info.length:0.3f}s ({sec_to_hms(info.length)}; {info.length_samples} samples)\n"
+        f"Sample rate: {info.samplerate}Hz\n"
         # "\n"
         # f"Clip length: {duration:0.3f}s\n"
     )
