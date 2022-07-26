@@ -16,9 +16,15 @@ warnings.filterwarnings('ignore')  # shut up a librosa warning
 
 # typical python bits
 import argparse
-from dataclasses import dataclass
+import atexit
+import dataclasses
+import json
 from pathlib import Path
 import re
+import subprocess
+import sys
+import tempfile
+from typing import Optional
 
 # mathy python bits
 import matplotlib.pyplot as plt
@@ -26,16 +32,30 @@ import librosa
 import numpy
 import numpy as np
 from scipy import signal
+import soundfile as sf
 
-
-@dataclass
+# class to hold our analysis data, and wrangle it to disk
+@dataclasses.dataclass
 class OffsetInfo(object):
+    file: str  # without path
     start: float
     start_samples: int
     end: float
     length: float
     length_samples: int
     samplerate: int
+
+    duration: float = None
+
+    # original request parameters
+    arg_start_offset: float = None
+    arg_search_offset: float = None
+    arg_window: int = None
+    arg_realstart: float = None
+
+    def dump_to(self, file: Path) -> None:
+        with file.open("w") as fp:
+            json.dump(dataclasses.asdict(self), fp, indent=4)
 
 
 # A very basic HH:MM:SS.SSS format to seconds conversion. We could
@@ -68,7 +88,77 @@ def sec_to_hms(secs: float) -> str:
     minutes = int(secs // 60)
     secs %= 60
 
-    return f"{hours:02d}:{minutes:02d}:{secs:02.3f}"
+    ms = int((secs % 1) * 1000)
+    secs = int(secs)
+
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}.{ms:03d}"
+
+
+# For whatever reason, the `soundfile` library doesn't let us load
+# the audio file direct from a video, but we want to use that library
+# for processing our audio data a chunk at a time... so extract the
+# audio as a wav we can then wrangle.
+#
+# I'd love to do this via librosa (so we don't need another program),
+# but best I can tell the only way to do that involves loading the
+# entire (potentially long) audio completely into memory, which I'd
+# rather avoid.
+#
+# Maybe we can do that as a fallback if ffmpeg isn't available?
+#
+# If no filename is provided, a temp file will be created, and cleaned up when
+# the program exits.
+def wav_extract(file: Path, output: Optional[Path] = None) -> Optional[Path]:
+    if not output:
+        fd, newfile = tempfile.mkstemp(suffix=".wav")
+        os.close(fd)
+        output = Path(newfile)
+
+        atexit.register(lambda: output.unlink())
+
+    ffmpeg_cmd = [
+        "ffmpeg",
+        "-i", str(file),
+        "-vn",
+        "-f", "wav",
+        "-y",
+        str(output),
+    ]
+
+    try:
+        subprocess.run(ffmpeg_cmd, stdin=None, capture_output=True, shell=False, check=True)
+    except FileNotFoundError as e:
+        print("WARNING: ffmpeg not found in path, so no layer diffs", file=sys.stderr)
+        return None
+    except subprocess.CalledProcessError as e:
+        print(f"WARNING: ffmpeg exited code {e.returncode}, so no layer diffs", file=sys.stderr)
+        return None
+
+    # else
+    return output
+
+
+# make some diffs. Assumes everything is stereo
+def wav_diff(wav: Path, info: OffsetInfo, output: str, layers: int = 4) -> None:
+    prev = [None] * layers
+
+    outputs = []
+    for i in reversed(range(1, layers + 1)):
+        outputs.append(sf.SoundFile(f"{output}-{i}.wav", "w",
+                       samplerate=info.samplerate, channels=2))
+
+    for block in sf.blocks(str(wav), blocksize=info.length_samples, overlap=0, start=info.start_samples, dtype='int16'):
+        # print(f"read block size: {len(block)}")
+        for i in range(0, 4):
+            if prev[i] is not None and len(prev[i]) == len(block):
+                outputs[i].write(block - prev[i])
+            else:
+                outputs[i].write(np.zeros(block.shape))
+
+        prev = prev[1:]
+        prev.append(block)
+
+    pass
 
 
 # Take a bit of audio, and some offsets, run some correlation on it, and
@@ -123,14 +213,13 @@ def find_offset(file: Path, start_offset: float, search_offset: float, window: i
     plt.figure(figsize=(14, 5))
     plt.title("Correlation")
     plt.plot(c)
-    plt.savefig("cross-correlation.png")
+    plt.savefig(file.with_name("correlation.png"))
 
     if not skip_graph:
         try:
             plt.show()
         except Exception:  # FIXME: figure out what this actually throws, and catch that
             print("ERROR: can't show graph. Make sure you have a matplotlib backend installed.")
-
 
 
     # So at this point we have...
@@ -143,11 +232,11 @@ def find_offset(file: Path, start_offset: float, search_offset: float, window: i
     #   - end: the end time of the loop within the file
     #   - length: the length of the loop
     start_samples = int(start_offset * samplerate)
-    endtime = search_offset + match_offset
+    endtime = float(search_offset + match_offset)
     endtime_samples = int(search_offset * samplerate) + peak
-    length = endtime - start_offset
-    length_samples = endtime_samples - start_samples
-    return OffsetInfo(start=start_offset, start_samples=start_samples, end=endtime, length=length, length_samples=length_samples, samplerate=samplerate)
+    length = float(endtime - start_offset)
+    length_samples = int(endtime_samples - start_samples)
+    return OffsetInfo(file=file.name, start=start_offset, start_samples=start_samples, end=endtime, length=length, length_samples=length_samples, samplerate=samplerate)
 
 
 # helper function to validate and parse a provided time string
@@ -203,6 +292,18 @@ def parse_arguments():
         help='Generate marker data cut & paste block',
     )
 
+    # hidden because it's a real fricking mess to use, and is useful in
+    # limited situations.
+    parser.add_argument(
+        "--diffs",
+        const=4,
+        default=0,
+        action='store',
+        nargs='?',
+        type=int,
+        help=argparse.SUPPRESS,
+    )
+
     parser.add_argument(
         "--no-graph", "--nograph",
         default=False,
@@ -223,13 +324,12 @@ def parse_arguments():
 
 
 def main():
-    os.environ["NUMBA_THREADING_LAYER"] = "workqueue"
-
+    # os.environ["NUMBA_THREADING_LAYER"] = "workqueue"
     args = parse_arguments()
     info = find_offset(args.file, args.start, args.searchat, args.window, args.no_graph)
 
     # Figure out how long the file is, total, mostly for creating markers
-    duration = librosa.get_duration(filename=str(args.file))
+    info.duration = librosa.get_duration(filename=str(args.file))
 
     # If we're not using the actual loop start time in our match parameters,
     # take the offsets we calculated and shift them so that we end up reporting
@@ -239,22 +339,29 @@ def main():
         info.start -= real_offset
         info.end -= real_offset
 
+    info.arg_start_offset = args.start
+    info.arg_search_offset = args.searchat
+    info.arg_window = args.window
+    info.arg_realstart = args.realstart
+
+
     print(
         "\n"
         f"Loop start:  {info.start:0.3f}s ({sec_to_hms(info.start)}; {info.start_samples} samples)\n"
         f"Loop end:    {info.end:0.3f}s ({sec_to_hms(info.end)})\n"
         f"Loop length: {info.length:0.3f}s ({sec_to_hms(info.length)}; {info.length_samples} samples)\n"
         f"Sample rate: {info.samplerate}Hz\n"
-        # "\n"
-        # f"Clip length: {duration:0.3f}s\n"
     )
 
-    #     print(
-    #         f"Loop start: {info['start']:0.3f}s\nEnds at: {info['end']:0.3f}\nLoop length: {info['length']:0.3f}s\nTrack duration: {duration:0.3f}s")
+    info.dump_to(args.file.with_name("correlation.json"))
 
-    # else:
-    #     print(
-    #         f"Loop start: {info['start']:0.3f}s\nEnds at: {info['end']:0.3f}\nLoop length: {info['length']:0.3f}s\nTrack duration: {duration:0.3f}s")
+    if args.diffs > 0:
+        wavfile = wav_extract(args.file)
+
+        # if there's an error, it'll be displayed by wav_extract, otherwise...
+        if wavfile:
+            wav_diff(wavfile, info, str(args.file.with_name("audiodiff")), layers=4)
+            print(f"Wrote {args.diffs} audio diff layers")
 
     if args.markers > 0:
         t = info.start
@@ -265,7 +372,7 @@ def main():
             print(f"{t:0.6f},{t:0.6f},1,segmentation,Loop_{i}")
             i += 1
             t += info.length
-            if t > (duration + info.length):
+            if t > (info.duration + info.length):
                 break
 
 
