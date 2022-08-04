@@ -149,7 +149,7 @@ def wav_diff(wav: Path, info: OffsetInfo, output: str, layers: int = 4) -> None:
 
     for block in sf.blocks(str(wav), blocksize=info.length_samples, overlap=0, start=info.start_samples, dtype='int16'):
         # print(f"read block size: {len(block)}")
-        for i in range(0, 4):
+        for i in range(0, layers):
             if prev[i] is not None and len(prev[i]) == len(block):
                 outputs[i].write(block - prev[i])
             else:
@@ -360,7 +360,7 @@ def main():
 
         # if there's an error, it'll be displayed by wav_extract, otherwise...
         if wavfile:
-            wav_diff(wavfile, info, str(args.file.with_name("audiodiff")), layers=4)
+            wav_diff(wavfile, info, str(args.file.with_name("audiodiff")), layers=args.diffs)
             print(f"Wrote {args.diffs} audio diff layers")
 
     if args.markers > 0:
