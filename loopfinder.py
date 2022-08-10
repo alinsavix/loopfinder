@@ -145,7 +145,7 @@ def wav_diff(wav: Path, info: OffsetInfo, output: str, layers: int = 4) -> None:
     outputs = []
     for i in reversed(range(1, layers + 1)):
         outputs.append(sf.SoundFile(f"{output}-{i}.wav", "w",
-                       samplerate=info.samplerate, channels=2))
+                                    samplerate=info.samplerate, channels=2))
 
     for block in sf.blocks(str(wav), blocksize=info.length_samples, overlap=0, start=info.start_samples, dtype='int16'):
         # print(f"read block size: {len(block)}")
@@ -368,12 +368,17 @@ def main():
         i = 1
 
         print()
-        while True:
-            print(f"{t:0.6f},{t:0.6f},1,segmentation,Loop_{i}")
-            i += 1
-            t += info.length
-            if t > (info.duration + info.length):
-                break
+
+        # I hate long lines and I cannot lie (...sigh)
+        with args.file.with_name("markers_premiere.txt").open("w") as markers_prem, \
+                args.file.with_name("markers_audacity.txt").open("w") as markers_aud:
+            while True:
+                print(f"{t:0.6f},{t:0.6f},1,segmentation,Loop_{i}", file=markers_prem)
+                print(f"{t:0.6f}\t{t:0.6f}\tLoop_{i}", file=markers_aud)
+                i += 1
+                t += info.length
+                if t > (info.duration + info.length):
+                    break
 
 
 if __name__ == '__main__':
