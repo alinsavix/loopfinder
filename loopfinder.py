@@ -53,6 +53,7 @@ class OffsetInfo(object):
     arg_search_offset: float = None
     arg_window: int = None
     arg_realstart: float = None
+    arg_fft: bool = False
 
     def dump_to(self, file: Path) -> None:
         with file.open("w") as fp:
@@ -165,7 +166,7 @@ def wav_diff(wav: Path, info: OffsetInfo, output: str, layers: int = 4) -> None:
 # Take a bit of audio, and some offsets, run some correlation on it, and
 # figure out where the best correlation happens, which is probably where our
 # loop repeats. Not guaranteed to work, but it seems to work reasonably well.
-def find_offset(file: Path, start_offset: float, search_offset: float, window: int, skip_graph: bool = False) -> OffsetInfo:
+def find_offset(file: Path, start_offset: float, search_offset: float, window: int, skip_graph: bool = False, use_fft: bool = False) -> OffsetInfo:
     is_reversed = True if search_offset < start_offset else False
     # load in the parts of the intput file that we need (as numpy arrays of floats)
     right, samplerate = librosa.load(
@@ -194,7 +195,12 @@ def find_offset(file: Path, start_offset: float, search_offset: float, window: i
     # And then on the audio to be searched, turn anything that's too loud to
     # be part of the correlation into NANs, which should (I think) basically
     # amount to a negative correlation at that point.
-    left[abs(left) > 1.0] = np.NAN
+    #
+    # FIXME: collapse this again when use_fft is sorted better
+    if use_fft:
+        left[abs(left) > 1.0] = 0.0
+    else:
+        left[abs(left) > 1.0] = np.NAN
 
     # I won't lie, I don't entirely understand the specifics of why this
     # particular set of options works. From what I can tell, doing the
@@ -203,7 +209,10 @@ def find_offset(file: Path, start_offset: float, search_offset: float, window: i
     # of it for the correlation we want to measure. There may even be a
     # better way to do this overall, but my math skills have long since
     # atrophied far too hard to figure out what that way would be.  --A
-    c = numpy.correlate(left, right, mode='full')[len(right) - 1:]
+    if use_fft:
+        c = signal.correlate(left, right, mode='full', method='fft')[len(right) - 1:]
+    else:
+        c = numpy.correlate(left, right, mode='full')[len(right) - 1:]
 
     # find the index & offset of the single highest correlation
     peak = np.nanargmax(c)
@@ -335,6 +344,14 @@ def parse_arguments():
         help="Use n seconds of audio from start postion for matching",
     )
 
+    # experimental support for correlating w/ a FFT
+    parser.add_argument(
+        "--fft",
+        default=False,
+        action='store_true',
+        help=argparse.SUPPRESS,
+    )
+
     parser.add_argument(
         "--markers",
         "--no-markers",
@@ -348,11 +365,8 @@ def parse_arguments():
     # limited situations.
     parser.add_argument(
         "--diffs",
-        const=4,
-        default=0,
-        action='store',
-        nargs='?',
         type=int,
+        default=0,
         help=argparse.SUPPRESS,
     )
 
@@ -378,7 +392,8 @@ def parse_arguments():
 def main():
     # os.environ["NUMBA_THREADING_LAYER"] = "workqueue"
     args = parse_arguments()
-    info = find_offset(args.file, args.start, args.searchat, args.window, args.no_graph)
+    info = find_offset(args.file, args.start, args.searchat,
+                       args.window, args.no_graph, args.fft)
 
     # Figure out how long the file is, total, mostly for creating markers
     info.duration = librosa.get_duration(filename=str(args.file))
@@ -395,6 +410,7 @@ def main():
     info.arg_search_offset = args.searchat
     info.arg_window = args.window
     info.arg_realstart = args.realstart
+    info.arg_fft = args.fft
 
 
     print(
