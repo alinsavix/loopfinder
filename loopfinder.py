@@ -41,6 +41,7 @@ class OffsetInfo(object):
     start: float
     start_samples: int
     end: float
+    end_samples: int
     length: float
     length_samples: int
     samplerate: int
@@ -165,11 +166,35 @@ def wav_diff(wav: Path, info: OffsetInfo, output: str, layers: int = 4) -> None:
 # figure out where the best correlation happens, which is probably where our
 # loop repeats. Not guaranteed to work, but it seems to work reasonably well.
 def find_offset(file: Path, start_offset: float, search_offset: float, window: int, skip_graph: bool = False) -> OffsetInfo:
+    is_reversed = True if search_offset < start_offset else False
     # load in the parts of the intput file that we need (as numpy arrays of floats)
     right, samplerate = librosa.load(
         str(file), sr=None, offset=start_offset, duration=window, mono=True)
-    left, _ = librosa.load(str(file), sr=samplerate, offset=search_offset,
-                           duration=4 * window, mono=True)
+
+
+    if is_reversed:
+        left, _ = librosa.load(str(file), sr=samplerate, offset=search_offset,
+                               duration=min(start_offset - search_offset, window * 8), mono=True)
+    else:
+        left, _ = librosa.load(str(file), sr=samplerate, offset=search_offset,
+                               duration=4 * window, mono=True)
+
+
+    # do some multiplying to make the very low (usually) audio signal a bit
+    # louder, for better correlations. We'll also remove things in the area
+    # to be searched that would be clipped, because they can't possibly be
+    # part of an good correlation. We're using 0.8 as the volume we want to
+    # reach, just to give ourselves some wiggle room.
+    src_max = np.max(np.abs(right))
+    mult = 0.8 / src_max
+
+    right *= mult
+    left *= mult
+
+    # And then on the audio to be searched, turn anything that's too loud to
+    # be part of the correlation into NANs, which should (I think) basically
+    # amount to a negative correlation at that point.
+    left[abs(left) > 1.0] = np.NAN
 
     # I won't lie, I don't entirely understand the specifics of why this
     # particular set of options works. From what I can tell, doing the
@@ -181,8 +206,9 @@ def find_offset(file: Path, start_offset: float, search_offset: float, window: i
     c = numpy.correlate(left, right, mode='full')[len(right) - 1:]
 
     # find the index & offset of the single highest correlation
-    peak = np.argmax(c)
+    peak = np.nanargmax(c)
     match_offset = round(peak / samplerate, 3)
+
 
     # I've absolutely zero clue what a good way to tell if the correlation was
     # actually a GOOD one, other than looking at the correlation graph with my
@@ -193,6 +219,10 @@ def find_offset(file: Path, start_offset: float, search_offset: float, window: i
     # may not be useful in the future for figuring out correlation quality.
     match_audio = left[peak:peak + (window * samplerate)]  # the actual audio we matched
 
+    if len(match_audio) != (window * samplerate):
+        print("ERROR: match failed (best correlation is incomplete)", file=sys.stderr)
+        sys.exit(1)
+
     # subtract our original audio signal from our match, under the theory that these
     # numbers should be far smaller for an actual good correlation. Multiplying by
     # 2**15 gives us a number that corresponds roughly to 16-bit audio values
@@ -200,7 +230,7 @@ def find_offset(file: Path, start_offset: float, search_offset: float, window: i
 
     # measure that difference overall, under the idea that it should be pretty small for
     # a good correlation
-    avg = numpy.average(numpy.abs(diff))
+    avg = numpy.average(numpy.abs(diff)) / mult
 
     # prominence theoretically measures how, uh, prominent a peak is, for some
     # mathematical definition of such. Not sure this is the most useful measure
@@ -231,12 +261,26 @@ def find_offset(file: Path, start_offset: float, search_offset: float, window: i
     #   - start: the start time of the loop within the provided file
     #   - end: the end time of the loop within the file
     #   - length: the length of the loop
-    start_samples = int(start_offset * samplerate)
-    endtime = float(search_offset + match_offset)
-    endtime_samples = int(search_offset * samplerate) + peak
-    length = float(endtime - start_offset)
-    length_samples = int(endtime_samples - start_samples)
-    return OffsetInfo(file=file.name, start=start_offset, start_samples=start_samples, end=endtime, length=length, length_samples=length_samples, samplerate=samplerate)
+
+    # if it's reversed, we have to flipflop everything
+    if is_reversed:
+        starttime = float(search_offset + match_offset)
+        start_samples = int(search_offset * samplerate) + int(peak)
+        endtime = float(start_offset)
+        end_samples = int(endtime * samplerate)
+        length = float(endtime - starttime)
+        length_samples = int(end_samples - start_samples)
+    else:
+        starttime = float(start_offset)
+        start_samples = int(starttime * samplerate)
+        endtime = float(search_offset + match_offset)
+        end_samples = int(search_offset * samplerate) + int(peak)
+        length = float(endtime - start_offset)
+        length_samples = int(end_samples - start_samples)
+
+    oi = OffsetInfo(file=file.name, start=starttime, start_samples=start_samples, end=endtime,
+                    end_samples=end_samples, length=length, length_samples=length_samples, samplerate=samplerate)
+    return oi
 
 
 # helper function to validate and parse a provided time string
