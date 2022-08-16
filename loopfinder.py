@@ -24,7 +24,7 @@ import re
 import subprocess
 import sys
 import tempfile
-from typing import Optional
+from typing import Union, Text, Sequence, Any, Optional
 
 # mathy python bits
 import matplotlib.pyplot as plt
@@ -294,6 +294,12 @@ def offset_str(arg_value: str) -> float:
     return hms_to_sec(arg_value)
 
 
+class NegateAction(argparse.Action):
+    def __call__(self, parser: argparse.ArgumentParser, namespace: argparse.Namespace,
+                 values: Union[Text, Sequence[Any], None], option_string: Optional[Text] = "") -> None:
+        assert option_string is not None  # n
+        setattr(namespace, self.dest, option_string[2:4] != 'no')
+
 def parse_arguments():
     parser = argparse.ArgumentParser()
 
@@ -331,8 +337,10 @@ def parse_arguments():
 
     parser.add_argument(
         "--markers",
-        default=False,
-        action='store_true',
+        "--no-markers",
+        default=True,
+        action=NegateAction,
+        nargs=0,
         help='Generate marker data cut & paste block',
     )
 
