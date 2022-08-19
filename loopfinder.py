@@ -150,10 +150,14 @@ def wav_diff(wav: Path, info: OffsetInfo, output: str, layers: int = 4) -> None:
                                     samplerate=info.samplerate, channels=2))
 
     for block in sf.blocks(str(wav), blocksize=info.length_samples, overlap=0, start=info.start_samples, dtype='int16'):
-        # print(f"read block size: {len(block)}")
+        # print(f"read block size: {len(block)}    shape: {block.shape}")
         for i in range(0, layers):
-            if prev[i] is not None and len(prev[i]) == len(block):
-                outputs[i].write(block - prev[i])
+            # if prev[i] is not None and len(prev[i]) == len(block):
+            if prev[i] is not None:
+                if len(prev[i]) == len(block):
+                    outputs[i].write(block - prev[i])
+                else:
+                    outputs[i].write(block - np.resize(prev[i], block.shape))
             else:
                 outputs[i].write(np.zeros(block.shape))
 
