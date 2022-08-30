@@ -51,6 +51,7 @@ class OffsetInfo(object):
     # original request parameters
     arg_start_offset: float = None
     arg_search_offset: float = None
+    arg_searchlength: int = None
     arg_window: int = None
     arg_realstart: float = None
     arg_fft: bool = False
@@ -170,19 +171,22 @@ def wav_diff(wav: Path, info: OffsetInfo, output: str, layers: int = 4) -> None:
 # Take a bit of audio, and some offsets, run some correlation on it, and
 # figure out where the best correlation happens, which is probably where our
 # loop repeats. Not guaranteed to work, but it seems to work reasonably well.
-def find_offset(file: Path, start_offset: float, search_offset: float, window: int, skip_graph: bool = False, use_fft: bool = False) -> OffsetInfo:
+def find_offset(file: Path, start_offset: float, search_offset: float, search_length: int,
+                window: int, skip_graph: bool = False, use_fft: bool = False) -> OffsetInfo:
     is_reversed = True if search_offset < start_offset else False
     # load in the parts of the intput file that we need (as numpy arrays of floats)
     right, samplerate = librosa.load(
         str(file), sr=None, offset=start_offset, duration=window, mono=True)
 
+    if search_length <= 0:
+        search_length = 4 * window
 
     if is_reversed:
         left, _ = librosa.load(str(file), sr=samplerate, offset=search_offset,
-                               duration=min(start_offset - search_offset, window * 8), mono=True)
+                               duration=min(start_offset - search_offset, search_length), mono=True)
     else:
         left, _ = librosa.load(str(file), sr=samplerate, offset=search_offset,
-                               duration=4 * window, mono=True)
+                               duration=search_length, mono=True)
 
 
     # do some multiplying to make the very low (usually) audio signal a bit
@@ -341,6 +345,14 @@ def parse_arguments():
     )
 
     parser.add_argument(
+        "--searchlength", "--searchlen", "--slength", "--slen",
+        metavar="seconds",
+        type=int,
+        default=0,
+        help="amount of data to be compared (starting at --searchat",
+    )
+
+    parser.add_argument(
         "--window",
         metavar="seconds",
         type=int,
@@ -397,7 +409,7 @@ def main():
     # os.environ["NUMBA_THREADING_LAYER"] = "workqueue"
     args = parse_arguments()
     info = find_offset(args.file, args.start, args.searchat,
-                       args.window, args.no_graph, args.fft)
+                       args.searchlength, args.window, args.no_graph, args.fft)
 
     # Figure out how long the file is, total, mostly for creating markers
     info.duration = librosa.get_duration(filename=str(args.file))
@@ -412,6 +424,7 @@ def main():
 
     info.arg_start_offset = args.start
     info.arg_search_offset = args.searchat
+    info.arg_searchlength = args.searchlength
     info.arg_window = args.window
     info.arg_realstart = args.realstart
     info.arg_fft = args.fft
