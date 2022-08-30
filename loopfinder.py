@@ -31,12 +31,32 @@ import matplotlib.pyplot as plt
 import librosa
 import numpy
 import numpy as np
+import numpy.typing as npt
 from scipy import signal
 import soundfile as sf
 
+
+@dataclasses.dataclass
+class OffsetDetail():
+    peak_sample: int
+    peak_value: float
+    avg_diff: float
+    peak_prominence: float
+
+
+# original request parameters
+class ArgsDetail():
+    start_offset: float
+    search_offset: float
+    searchlength: int
+    window: int
+    realstart: float
+    fft: bool
+
+
 # class to hold our analysis data, and wrangle it to disk
 @dataclasses.dataclass
-class OffsetInfo(object):
+class OffsetInfo():
     file: str  # without path
     start: float
     start_samples: int
@@ -46,17 +66,17 @@ class OffsetInfo(object):
     length_samples: int
     samplerate: int
 
+    correlation: npt.ArrayLike
+
     duration: float = None
 
-    # original request parameters
-    arg_start_offset: float = None
-    arg_search_offset: float = None
-    arg_searchlength: int = None
-    arg_window: int = None
-    arg_realstart: float = None
-    arg_fft: bool = False
+    detail: OffsetDetail = None
+    args: ArgsDetail = None
 
     def dump_to(self, file: Path) -> None:
+        trimmed = self
+        trimmed.correlation = None
+
         with file.open("w") as fp:
             json.dump(dataclasses.asdict(self), fp, indent=4)
 
@@ -168,6 +188,23 @@ def wav_diff(wav: Path, info: OffsetInfo, output: str, layers: int = 4) -> None:
     pass
 
 
+# The file argument here is the full path, so that we know where to write out
+# the correlation graph.
+def graph(oi: OffsetInfo, file: Path, skip_graph: bool = False):
+    x_scale = np.arange(oi.start_samples, oi.start_samples + len(oi.correlation)) / 48000.0
+    plt.figure(figsize=(14, 5))
+    plt.title(f"Correlation for '{oi.file}'")
+    plt.xlabel("seconds")
+    plt.plot(x_scale, oi.correlation)
+    plt.savefig(file.with_name("correlation.png"))
+
+    if not skip_graph:
+        try:
+            plt.show()
+        except Exception:  # FIXME: figure out what this actually throws, and catch that
+            print("ERROR: can't show graph. Make sure you have a matplotlib backend installed.")
+
+
 # Take a bit of audio, and some offsets, run some correlation on it, and
 # figure out where the best correlation happens, which is probably where our
 # loop repeats. Not guaranteed to work, but it seems to work reasonably well.
@@ -240,35 +277,6 @@ def find_offset(file: Path, start_offset: float, search_offset: float, search_le
         print("ERROR: match failed (best correlation is incomplete)", file=sys.stderr)
         sys.exit(1)
 
-    # subtract our original audio signal from our match, under the theory that these
-    # numbers should be far smaller for an actual good correlation. Multiplying by
-    # 2**15 gives us a number that corresponds roughly to 16-bit audio values
-    diff = numpy.multiply(match_audio, 2**15) - numpy.multiply(right, 2**15)
-
-    # measure that difference overall, under the idea that it should be pretty small for
-    # a good correlation
-    avg = numpy.average(numpy.abs(diff)) / mult
-
-    # prominence theoretically measures how, uh, prominent a peak is, for some
-    # mathematical definition of such. Not sure this is the most useful measure
-    # of this, but time will (or may, at least) tell.
-    # See: https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.peak_prominences.html
-    prom = float(signal.peak_prominences(c, [peak], wlen=samplerate)[0])
-    print(f"Found! {peak} samples ({match_offset:0.3f}s) from search offset {search_offset:0.3f}s")
-    print(f"       peak corr. {c[peak]:0.3f}, avg diff. {avg:0.3f}, prominence {prom:0.3f}")
-
-    plt.figure(figsize=(14, 5))
-    plt.title("Correlation")
-    plt.plot(c)
-    plt.savefig(file.with_name("correlation.png"))
-
-    if not skip_graph:
-        try:
-            plt.show()
-        except Exception:  # FIXME: figure out what this actually throws, and catch that
-            print("ERROR: can't show graph. Make sure you have a matplotlib backend installed.")
-
-
     # So at this point we have...
     # - the snippet of audio we're looking for, which starts at 0.000s, and
     #   lasts for `window` seconds. The -actual- start time is `args.start + 0.000s``
@@ -295,8 +303,47 @@ def find_offset(file: Path, start_offset: float, search_offset: float, search_le
         length = float(endtime - start_offset)
         length_samples = int(end_samples - start_samples)
 
+
     oi = OffsetInfo(file=file.name, start=starttime, start_samples=start_samples, end=endtime,
-                    end_samples=end_samples, length=length, length_samples=length_samples, samplerate=samplerate)
+                    end_samples=end_samples, length=length, length_samples=length_samples,
+                    samplerate=samplerate, correlation=c)
+
+
+    # subtract our original audio signal from our match, under the theory that these
+    # numbers should be far smaller for an actual good correlation. Multiplying by
+    # 2**15 gives us a number that corresponds roughly to 16-bit audio values
+    diff = numpy.multiply(match_audio, 2**15) - numpy.multiply(right, 2**15)
+
+    # measure that difference overall, under the idea that it should be pretty small for
+    # a good correlation
+    avg = numpy.average(numpy.abs(diff)) / mult
+
+    # prominence theoretically measures how, uh, prominent a peak is, for some
+    # mathematical definition of such. Not sure this is the most useful measure
+    # of this, but time will (or may, at least) tell.
+    # See: https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.peak_prominences.html
+    prom = float(signal.peak_prominences(c, [peak], wlen=samplerate)[0])
+    print(f"Found! {peak} samples ({match_offset:0.3f}s) from search offset {search_offset:0.3f}s")
+    print(f"       peak corr. {c[peak]:0.3f}, avg diff. {avg:0.3f}, prominence {prom:0.3f}")
+
+    oi.detail = OffsetDetail(peak_sample=int(peak), peak_value=float(c[peak]), avg_diff=float(avg),
+                             peak_prominence=float(prom))
+
+
+    graph(oi, file, skip_graph)
+
+    # plt.figure(figsize=(14, 5))
+    # plt.title("Correlation")
+    # plt.plot(c)
+    # plt.savefig(file.with_name("correlation.png"))
+
+    # if not skip_graph:
+    #     try:
+    #         plt.show()
+    #     except Exception:  # FIXME: figure out what this actually throws, and catch that
+    #         print("ERROR: can't show graph. Make sure you have a matplotlib backend installed.")
+
+
     return oi
 
 
