@@ -152,7 +152,7 @@ def wav_extract(file: Path, output: Optional[Path] = None) -> Optional[Path]:
         "-vn",
         "-f", "wav",
         "-y",
-        str(output),
+        str(outpath),
     ]
 
     try:
@@ -165,7 +165,7 @@ def wav_extract(file: Path, output: Optional[Path] = None) -> Optional[Path]:
         return None
 
     # else
-    return output
+    return outpath
 
 
 # make some diffs. Assumes everything is stereo
@@ -500,8 +500,6 @@ def main():
     )
 
     info.dump_to(args.file.with_name("correlation.json"))
-
-    print(f"diffs: {args.diffs}")
 
     if args.diffs > 0:
         wavfile = wav_extract(args.file)
