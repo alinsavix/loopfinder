@@ -185,10 +185,10 @@ def wav_diff(wav: Path, info: OffsetInfo, output: str, layers: int = 4) -> None:
         for i in range(0, layers):
             # if prev[i] is not None and len(prev[i]) == len(block):
             if prev[i] is not None:
-                if len(prev[i]) == len(block):
+                if len(prev[i]) == len(block):  # type: ignore
                     outputs[i].write(block - prev[i])
                 else:
-                    outputs[i].write(block - np.resize(prev[i], block.shape))
+                    outputs[i].write(block - np.resize(prev[i], block.shape))  # type: ignore
             else:
                 outputs[i].write(np.zeros(block.shape))
 
@@ -417,11 +417,12 @@ def parse_arguments():
         help="Use n seconds of audio from start postion for matching",
     )
 
-    # experimental support for correlating w/ a FFT
     parser.add_argument(
         "--fft",
-        default=False,
-        action='store_true',
+        "--no-fft",
+        default=True,
+        action=NegateAction,
+        nargs=0,
         help=argparse.SUPPRESS,
     )
 
@@ -499,6 +500,8 @@ def main():
     )
 
     info.dump_to(args.file.with_name("correlation.json"))
+
+    print(f"diffs: {args.diffs}")
 
     if args.diffs > 0:
         wavfile = wav_extract(args.file)
