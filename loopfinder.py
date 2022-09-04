@@ -24,7 +24,7 @@ import re
 import subprocess
 import sys
 import tempfile
-from typing import Union, Text, Sequence, Any, Optional
+from typing import Union, Text, Sequence, Any, Optional, List
 
 # mathy python bits
 import matplotlib.pyplot as plt
@@ -45,6 +45,7 @@ class OffsetDetail():
 
 
 # original request parameters
+@dataclasses.dataclass
 class ArgsDetail():
     start_offset: float
     search_offset: float
@@ -66,12 +67,12 @@ class OffsetInfo():
     length_samples: int
     samplerate: int
 
-    correlation: npt.ArrayLike
+    correlation: Optional[npt.ArrayLike]
 
-    duration: float = None
+    duration: Optional[float] = None
 
-    detail: OffsetDetail = None
-    args: ArgsDetail = None
+    detail: Optional[OffsetDetail] = None
+    args: Optional[ArgsDetail] = None
 
     def dump_to(self, file: Path) -> None:
         trimmed = self
@@ -91,12 +92,15 @@ def hms_to_sec(hms: str) -> float:
     if len(timesplit) == 3:
         h, m, s = timesplit
     elif len(timesplit) == 2:
-        h = 0
+        h = "0"
         m, s = timesplit
     elif len(timesplit) == 1:
-        h = 0
-        m = 0
+        h = "0"
+        m = "0"
         s = timesplit[0]
+    else:
+        print(f"ERROR: too many fields ({len(timesplit)}) in hh:mm:ss string")
+        sys.exit(1)
 
     return (int(h) * 60 * 60) + (int(m) * 60) + float(s)
 
@@ -135,9 +139,12 @@ def wav_extract(file: Path, output: Optional[Path] = None) -> Optional[Path]:
     if not output:
         fd, newfile = tempfile.mkstemp(suffix=".wav")
         os.close(fd)
-        output = Path(newfile)
+        outpath = Path(newfile)
 
-        atexit.register(lambda: output.unlink())
+        atexit.register(lambda: outpath.unlink())
+
+    else:
+        outpath = output
 
     ffmpeg_cmd = [
         "ffmpeg",
@@ -163,12 +170,15 @@ def wav_extract(file: Path, output: Optional[Path] = None) -> Optional[Path]:
 
 # make some diffs. Assumes everything is stereo
 def wav_diff(wav: Path, info: OffsetInfo, output: str, layers: int = 4) -> None:
-    prev = [None] * layers
+    prev: List[Optional[npt.ArrayLike]] = [None] * layers
 
     outputs = []
     for i in reversed(range(1, layers + 1)):
-        outputs.append(sf.SoundFile(f"{output}-{i}.wav", "w",
-                                    samplerate=info.samplerate, channels=2))
+        # outputs.append(sf.SoundFile(f"{output}-{i}.wav", "w",
+        #                             samplerate=info.samplerate, channels=2))
+        of = sf.SoundFile(f"{output}-{i}.wav", "w", samplerate=info.samplerate, channels=2)
+        # of.write(np.zeros((info.start_samples, 2)))
+        outputs.append(of)
 
     for block in sf.blocks(str(wav), blocksize=info.length_samples, overlap=0, start=info.start_samples, dtype='int16'):
         # print(f"read block size: {len(block)}    shape: {block.shape}")
@@ -467,15 +477,18 @@ def main():
     if args.realstart > 0:
         real_offset = info.start - args.realstart
         info.start -= real_offset
+        info.start_samples -= int(real_offset * info.samplerate)
         info.end -= real_offset
+        info.end_samples -= int(real_offset * info.samplerate)
 
-    info.arg_start_offset = args.start
-    info.arg_search_offset = args.searchat
-    info.arg_searchlength = args.searchlength
-    info.arg_window = args.window
-    info.arg_realstart = args.realstart
-    info.arg_fft = args.fft
-
+    info.args = ArgsDetail(
+        start_offset=args.start,
+        search_offset=args.searchat,
+        searchlength=args.searchlength,
+        window=args.window,
+        realstart=args.realstart,
+        fft=args.fft
+    )
 
     print(
         "\n"
