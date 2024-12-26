@@ -519,7 +519,7 @@ def main():
         with args.file.with_name("markers_premiere.txt").open("w") as markers_prem, \
                 args.file.with_name("markers_audacity.txt").open("w") as markers_aud:
             while True:
-                print(f"{t:0.6f},{t:0.6f},1,segmentation,Loop_{i}", file=markers_prem)
+                print(f"{t:0.6f},{t:0.6f},6,segmentation,Loop_{i}", file=markers_prem)
                 print(f"{t:0.6f}\t{t:0.6f}\tLoop_{i}", file=markers_aud)
                 i += 1
                 t += info.length
